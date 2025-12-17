@@ -40,7 +40,8 @@ Créez un fichier `.markd-sync.json` à la racine de votre projet de documentati
 - `api_url` : URL de l'API MarkD
 - `username` / `password` : Identifiants pour l'authentification (recommandé)
 - `api_token` : JWT token direct (alternative à username/password)
-- `docs_path` : Chemin vers l'arborescence de documentation (relatif au fichier de config ou absolu)
+- `source_path` : Chemin local où le dev travaille (relatif au fichier de config ou absolu)
+- `destination_path` : Chemin dans l'arbre du workspace MarkD (ex: `"projects/documentation"` ou `"folder1/subfolder"`)
 
 ## Utilisation
 

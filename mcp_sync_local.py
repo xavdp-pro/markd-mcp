@@ -64,19 +64,20 @@ class MarkDSyncClient:
         self.config_path = config_path
         self.config = self.load_config()
         
-        # Déterminer le chemin de l'arborescence de docs
-        # Option 1 : docs_path explicite dans la config
-        # Option 2 : Chemin relatif depuis le fichier de config
-        # Option 3 : Par défaut : parent du fichier de config
-        if 'docs_path' in self.config:
-            docs_path = Path(self.config['docs_path'])
-            if not docs_path.is_absolute():
+        # Chemin source : dossier local où le dev travaille
+        if 'source_path' in self.config:
+            source_path = Path(self.config['source_path'])
+            if not source_path.is_absolute():
                 # Chemin relatif : depuis le fichier de config
-                docs_path = config_path.parent / docs_path
-            self.docs_root = docs_path.resolve()
+                source_path = config_path.parent / source_path
+            self.source_root = source_path.resolve()
         else:
             # Par défaut : parent du fichier de config
-            self.docs_root = config_path.parent
+            self.source_root = config_path.parent
+        
+        # Chemin destination : emplacement dans l'arbre du workspace MarkD
+        # Exemple: "projects/documentation" ou "folder1/subfolder"
+        self.destination_path = self.config.get('destination_path', '')
         
         self.session = None
         self.jwt_token = None
@@ -134,14 +135,18 @@ class MarkDSyncClient:
         if not self.workspace_id:
             raise ValueError("'workspace_id' must be provided in config")
         
-        # Vérifier que le dossier docs existe
-        if not self.docs_root.exists():
-            print(f"⚠️  Docs directory does not exist: {self.docs_root}")
+        # Vérifier que le dossier source existe
+        if not self.source_root.exists():
+            print(f"⚠️  Source directory does not exist: {self.source_root}")
             print(f"   Creating directory...")
-            self.docs_root.mkdir(parents=True, exist_ok=True)
+            self.source_root.mkdir(parents=True, exist_ok=True)
         
         print(f"📁 Workspace: {self.workspace_id}")
-        print(f"📂 Docs path: {self.docs_root}")
+        print(f"📂 Source path (local): {self.source_root}")
+        if self.destination_path:
+            print(f"📁 Destination path (workspace): {self.destination_path}")
+        else:
+            print(f"📁 Destination path (workspace): root")
         
         # Pull initial si activé
         if self.config.get('auto_pull'):
@@ -152,10 +157,10 @@ class MarkDSyncClient:
         if self.config.get('watch_enabled'):
             event_handler = MarkDSyncHandler(self)
             observer = Observer()
-            observer.schedule(event_handler, str(self.docs_root), recursive=True)
+            observer.schedule(event_handler, str(self.source_root), recursive=True)
             observer.start()
             
-            print(f"✅ Watching {self.docs_root} for changes...")
+            print(f"✅ Watching {self.source_root} for changes...")
             print("Press Ctrl+C to stop")
             
             try:
@@ -194,12 +199,18 @@ class MarkDSyncClient:
     
     async def create_document(self, name: str, content: str, metadata: dict) -> str:
         """Crée un nouveau document via l'API"""
+        # Déterminer le parent_id : utiliser destination_path si pas de parent dans metadata
+        parent_id = metadata.get('markd_parent')
+        if not parent_id and self.destination_path:
+            # Resoudre le parent depuis destination_path
+            parent_id = await self.resolve_destination_parent()
+        
         url = f"{self.config['api_url']}/api/documents"
         data = {
             "name": name,
             "type": "file",
             "content": self.strip_metadata(content),
-            "parent_id": metadata.get('markd_parent'),
+            "parent_id": parent_id,
             "workspace_id": self.workspace_id
         }
         
@@ -236,10 +247,61 @@ class MarkDSyncClient:
             result = await resp.json()
             await self.sync_tree_to_files(result['tree'])
     
+    async def resolve_destination_parent(self) -> Optional[str]:
+        """Résout le parent_id depuis destination_path dans le workspace"""
+        if not self.destination_path:
+            return None
+        
+        # Récupérer l'arbre complet du workspace
+        url = f"{self.config['api_url']}/api/documents/tree"
+        params = {"workspace_id": self.workspace_id}
+        
+        async with self.session.get(url, params=params) as resp:
+            if resp.status != 200:
+                return None
+            result = await resp.json()
+            tree = result.get('tree', [])
+        
+        # Naviguer dans l'arbre selon destination_path
+        path_parts = [p for p in self.destination_path.split('/') if p]
+        current_items = tree
+        current_parent_id = None
+        
+        for part in path_parts:
+            found = False
+            for item in current_items:
+                if item['name'] == part and item['type'] == 'folder':
+                    current_parent_id = item['id']
+                    current_items = item.get('children', [])
+                    found = True
+                    break
+            if not found:
+                # Le dossier n'existe pas, on retourne le dernier parent trouvé
+                break
+        
+        return current_parent_id
+    
     async def sync_tree_to_files(self, tree, parent_path: Path = None):
         """Synchronise l'arbre depuis l'API vers les fichiers locaux"""
         if parent_path is None:
-            parent_path = self.docs_root
+            parent_path = self.source_root
+        
+        # Si destination_path est spécifié, filtrer l'arbre pour ne sync que cette partie
+        if self.destination_path:
+            path_parts = [p for p in self.destination_path.split('/') if p]
+            current_tree = tree
+            for part in path_parts:
+                found = False
+                for item in current_tree:
+                    if item['name'] == part and item['type'] == 'folder':
+                        current_tree = item.get('children', [])
+                        found = True
+                        break
+                if not found:
+                    # Destination path n'existe pas, sync rien
+                    print(f"⚠️  Destination path '{self.destination_path}' not found in workspace")
+                    return
+            tree = current_tree
         
         for item in tree:
             if item['type'] == 'file':
@@ -344,7 +406,8 @@ async def main():
             "api_url": "http://localhost:8000",
             "username": "your-username",
             "password": "your-password",
-            "docs_path": "./docs",
+            "source_path": "./docs",
+            "destination_path": "projects/documentation",
             "sync_mode": "bidirectional",
             "watch_enabled": True,
             "auto_push": True,
