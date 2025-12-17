@@ -197,8 +197,27 @@ class MarkDSyncClient:
         except Exception as e:
             print(f"❌ Error pushing {file_path}: {e}")
     
+    async def check_mcp_permission(self) -> bool:
+        """Vérifie que l'utilisateur a les permissions write/admin pour utiliser MCP"""
+        try:
+            url = f"{self.config['api_url']}/api/mcp/configs/check"
+            params = {"workspace_id": self.workspace_id}
+            
+            async with self.session.get(url, params=params) as resp:
+                if resp.status != 200:
+                    return False
+                result = await resp.json()
+                return result.get('mcp_allowed', False)
+        except Exception as e:
+            print(f"⚠️  Error checking MCP permission: {e}")
+            return False
+    
     async def create_document(self, name: str, content: str, metadata: dict) -> str:
         """Crée un nouveau document via l'API"""
+        # Vérifier les permissions avant de créer
+        if not await self.check_mcp_permission():
+            raise Exception(f"MCP requires 'write' or 'admin' permission on workspace '{self.workspace_id}'. Current permission is insufficient.")
+        
         # Déterminer le parent_id : utiliser destination_path si pas de parent dans metadata
         parent_id = metadata.get('markd_parent')
         if not parent_id and self.destination_path:
@@ -223,6 +242,10 @@ class MarkDSyncClient:
     
     async def update_document(self, doc_id: str, content: str, name: str):
         """Met à jour un document via l'API"""
+        # Vérifier les permissions avant de mettre à jour
+        if not await self.check_mcp_permission():
+            raise Exception(f"MCP requires 'write' or 'admin' permission on workspace '{self.workspace_id}'. Current permission is insufficient.")
+        
         url = f"{self.config['api_url']}/api/documents/{doc_id}"
         data = {
             "content": self.strip_metadata(content),
