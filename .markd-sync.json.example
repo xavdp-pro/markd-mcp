@@ -1,6 +1,8 @@
 {
   "workspace_id": "workspace-1",
   "api_url": "http://localhost:8000",
+  "username": "your-username",
+  "password": "your-password",
   "api_token": "your-jwt-token-here",
   "sync_mode": "bidirectional",
   "watch_enabled": true,

@@ -65,6 +65,8 @@ class MarkDSyncClient:
         self.config = self.load_config()
         self.docs_root = config_path.parent
         self.session = None
+        self.jwt_token = None
+        self.workspace_id = self.config.get('workspace_id')
     
     def load_config(self) -> Dict:
         """Charge la configuration depuis .markd-sync.json"""
@@ -74,11 +76,72 @@ class MarkDSyncClient:
         with open(self.config_path) as f:
             return json.load(f)
     
+    async def authenticate(self) -> bool:
+        """Authentifie l'utilisateur avec login/password et récupère le JWT token"""
+        api_url = self.config['api_url']
+        username = self.config.get('username')
+        password = self.config.get('password')
+        
+        if not username or not password:
+            # Si pas de username/password, essayer avec api_token (JWT direct)
+            if self.config.get('api_token'):
+                self.jwt_token = self.config['api_token']
+                return True
+            else:
+                raise ValueError("Either 'username'/'password' or 'api_token' must be provided in config")
+        
+        # Login avec username/password
+        login_url = f"{api_url}/api/auth/login"
+        async with aiohttp.ClientSession() as temp_session:
+            async with temp_session.post(login_url, json={
+                "username": username,
+                "password": password
+            }) as resp:
+                if resp.status != 200:
+                    error = await resp.text()
+                    raise Exception(f"Authentication failed: {error}")
+                
+                result = await resp.json()
+                if not result.get('success'):
+                    raise Exception(f"Authentication failed: {result.get('detail', 'Unknown error')}")
+                
+                # Le JWT est dans le cookie, mais on peut aussi le stocker si retourné
+                # Pour les requêtes suivantes, on utilisera le cookie ou le header Authorization
+                # On va utiliser les cookies de la session
+                print(f"✅ Authenticated as {result['user'].get('username')}")
+                return True
+    
     async def start(self):
         """Démarre le client de synchronisation"""
+        # Authentifier d'abord
+        await self.authenticate()
+        
+        # Créer la session avec les cookies (pour le JWT)
+        # Si on a un token direct, l'utiliser dans le header
+        headers = {}
+        if self.jwt_token:
+            headers["Authorization"] = f"Bearer {self.jwt_token}"
+        
+        # Créer une session avec cookie support
+        cookie_jar = aiohttp.CookieJar()
         self.session = aiohttp.ClientSession(
-            headers={"Authorization": f"Bearer {self.config['api_token']}"}
+            headers=headers,
+            cookie_jar=cookie_jar
         )
+        
+        # Si on a username/password, faire le login pour obtenir le cookie
+        if self.config.get('username') and self.config.get('password'):
+            login_url = f"{self.config['api_url']}/api/auth/login"
+            async with self.session.post(login_url, json={
+                "username": self.config['username'],
+                "password": self.config['password']
+            }) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    print(f"✅ Authenticated as {result['user'].get('username')}")
+                else:
+                    error = await resp.text()
+                    raise Exception(f"Authentication failed: {error}")
         
         # Pull initial si activé
         if self.config.get('auto_pull'):
@@ -137,7 +200,7 @@ class MarkDSyncClient:
             "type": "file",
             "content": self.strip_metadata(content),
             "parent_id": metadata.get('markd_parent'),
-            "workspace_id": self.config['workspace_id']
+            "workspace_id": self.workspace_id
         }
         
         async with self.session.post(url, json=data) as resp:
@@ -164,7 +227,7 @@ class MarkDSyncClient:
     async def pull_all(self):
         """Pull tous les documents depuis l'API MarkD"""
         url = f"{self.config['api_url']}/api/documents/tree"
-        params = {"workspace_id": self.config['workspace_id']}
+        params = {"workspace_id": self.workspace_id}
         
         async with self.session.get(url, params=params) as resp:
             if resp.status != 200:
@@ -279,7 +342,8 @@ async def main():
         print(json.dumps({
             "workspace_id": "workspace-1",
             "api_url": "http://localhost:8000",
-            "api_token": "your-jwt-token",
+            "username": "your-username",
+            "password": "your-password",
             "sync_mode": "bidirectional",
             "watch_enabled": True,
             "auto_push": True,

@@ -24,7 +24,8 @@ Créez un fichier `.markd-sync.json` à la racine de votre projet de documentati
 {
   "workspace_id": "workspace-1",
   "api_url": "http://localhost:8000",
-  "api_token": "your-jwt-token-here",
+  "username": "your-username",
+  "password": "your-password",
   "sync_mode": "bidirectional",
   "watch_enabled": true,
   "auto_push": true,
@@ -32,6 +33,8 @@ Créez un fichier `.markd-sync.json` à la racine de votre projet de documentati
   "debounce_time": 2.0
 }
 ```
+
+**Note** : Vous pouvez utiliser soit `username`/`password` (recommandé), soit `api_token` (JWT direct).
 
 ## Utilisation
 
