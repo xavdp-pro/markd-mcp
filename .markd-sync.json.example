@@ -1,0 +1,11 @@
+{
+  "workspace_id": "workspace-1",
+  "api_url": "http://localhost:8000",
+  "api_token": "your-jwt-token-here",
+  "sync_mode": "bidirectional",
+  "watch_enabled": true,
+  "auto_push": true,
+  "auto_pull": false,
+  "debounce_time": 2.0
+}
+
