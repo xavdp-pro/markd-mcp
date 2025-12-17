@@ -63,7 +63,21 @@ class MarkDSyncClient:
     def __init__(self, config_path: Path):
         self.config_path = config_path
         self.config = self.load_config()
-        self.docs_root = config_path.parent
+        
+        # Déterminer le chemin de l'arborescence de docs
+        # Option 1 : docs_path explicite dans la config
+        # Option 2 : Chemin relatif depuis le fichier de config
+        # Option 3 : Par défaut : parent du fichier de config
+        if 'docs_path' in self.config:
+            docs_path = Path(self.config['docs_path'])
+            if not docs_path.is_absolute():
+                # Chemin relatif : depuis le fichier de config
+                docs_path = config_path.parent / docs_path
+            self.docs_root = docs_path.resolve()
+        else:
+            # Par défaut : parent du fichier de config
+            self.docs_root = config_path.parent
+        
         self.session = None
         self.jwt_token = None
         self.workspace_id = self.config.get('workspace_id')
@@ -120,7 +134,14 @@ class MarkDSyncClient:
         if not self.workspace_id:
             raise ValueError("'workspace_id' must be provided in config")
         
+        # Vérifier que le dossier docs existe
+        if not self.docs_root.exists():
+            print(f"⚠️  Docs directory does not exist: {self.docs_root}")
+            print(f"   Creating directory...")
+            self.docs_root.mkdir(parents=True, exist_ok=True)
+        
         print(f"📁 Workspace: {self.workspace_id}")
+        print(f"📂 Docs path: {self.docs_root}")
         
         # Pull initial si activé
         if self.config.get('auto_pull'):
@@ -323,6 +344,7 @@ async def main():
             "api_url": "http://localhost:8000",
             "username": "your-username",
             "password": "your-password",
+            "docs_path": "./docs",
             "sync_mode": "bidirectional",
             "watch_enabled": True,
             "auto_push": True,

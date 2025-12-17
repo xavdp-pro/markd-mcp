@@ -26,6 +26,7 @@ Créez un fichier `.markd-sync.json` à la racine de votre projet de documentati
   "api_url": "http://localhost:8000",
   "username": "your-username",
   "password": "your-password",
+  "docs_path": "./docs",
   "sync_mode": "bidirectional",
   "watch_enabled": true,
   "auto_push": true,
@@ -34,7 +35,12 @@ Créez un fichier `.markd-sync.json` à la racine de votre projet de documentati
 }
 ```
 
-**Note** : Vous pouvez utiliser soit `username`/`password` (recommandé), soit `api_token` (JWT direct).
+**Paramètres** :
+- `workspace_id` : ID du workspace MarkD (obligatoire)
+- `api_url` : URL de l'API MarkD
+- `username` / `password` : Identifiants pour l'authentification (recommandé)
+- `api_token` : JWT token direct (alternative à username/password)
+- `docs_path` : Chemin vers l'arborescence de documentation (relatif au fichier de config ou absolu)
 
 ## Utilisation
 
