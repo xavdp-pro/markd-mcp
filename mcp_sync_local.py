@@ -76,24 +76,21 @@ class MarkDSyncClient:
         with open(self.config_path) as f:
             return json.load(f)
     
-    async def authenticate(self) -> bool:
-        """Authentifie l'utilisateur avec login/password et récupère le JWT token"""
-        api_url = self.config['api_url']
+    async def start(self):
+        """Démarre le client de synchronisation"""
+        # Créer une session avec support des cookies (pour le JWT)
+        cookie_jar = aiohttp.CookieJar()
+        self.session = aiohttp.ClientSession(cookie_jar=cookie_jar)
+        
+        # Authentification : login avec username/password OU utiliser api_token
         username = self.config.get('username')
         password = self.config.get('password')
+        api_token = self.config.get('api_token')
         
-        if not username or not password:
-            # Si pas de username/password, essayer avec api_token (JWT direct)
-            if self.config.get('api_token'):
-                self.jwt_token = self.config['api_token']
-                return True
-            else:
-                raise ValueError("Either 'username'/'password' or 'api_token' must be provided in config")
-        
-        # Login avec username/password
-        login_url = f"{api_url}/api/auth/login"
-        async with aiohttp.ClientSession() as temp_session:
-            async with temp_session.post(login_url, json={
+        if username and password:
+            # Méthode 1 : Login avec username/password (recommandé)
+            login_url = f"{self.config['api_url']}/api/auth/login"
+            async with self.session.post(login_url, json={
                 "username": username,
                 "password": password
             }) as resp:
@@ -105,43 +102,25 @@ class MarkDSyncClient:
                 if not result.get('success'):
                     raise Exception(f"Authentication failed: {result.get('detail', 'Unknown error')}")
                 
-                # Le JWT est dans le cookie, mais on peut aussi le stocker si retourné
-                # Pour les requêtes suivantes, on utilisera le cookie ou le header Authorization
-                # On va utiliser les cookies de la session
+                # Le JWT est maintenant dans les cookies de la session
                 print(f"✅ Authenticated as {result['user'].get('username')}")
-                return True
-    
-    async def start(self):
-        """Démarre le client de synchronisation"""
-        # Authentifier d'abord
-        await self.authenticate()
         
-        # Créer la session avec les cookies (pour le JWT)
-        # Si on a un token direct, l'utiliser dans le header
-        headers = {}
-        if self.jwt_token:
-            headers["Authorization"] = f"Bearer {self.jwt_token}"
+        elif api_token:
+            # Méthode 2 : Utiliser un JWT token direct (dans les cookies)
+            # Note: L'API MarkD attend le token dans le cookie 'markd_auth'
+            # On peut aussi l'utiliser dans le header Authorization si l'API le supporte
+            # Pour l'instant, on va utiliser les cookies
+            self.session.cookie_jar.update_cookies({'markd_auth': api_token})
+            print(f"✅ Using provided JWT token")
         
-        # Créer une session avec cookie support
-        cookie_jar = aiohttp.CookieJar()
-        self.session = aiohttp.ClientSession(
-            headers=headers,
-            cookie_jar=cookie_jar
-        )
+        else:
+            raise ValueError("Either 'username'/'password' or 'api_token' must be provided in config")
         
-        # Si on a username/password, faire le login pour obtenir le cookie
-        if self.config.get('username') and self.config.get('password'):
-            login_url = f"{self.config['api_url']}/api/auth/login"
-            async with self.session.post(login_url, json={
-                "username": self.config['username'],
-                "password": self.config['password']
-            }) as resp:
-                if resp.status == 200:
-                    result = await resp.json()
-                    print(f"✅ Authenticated as {result['user'].get('username')}")
-                else:
-                    error = await resp.text()
-                    raise Exception(f"Authentication failed: {error}")
+        # Vérifier que le workspace_id est défini
+        if not self.workspace_id:
+            raise ValueError("'workspace_id' must be provided in config")
+        
+        print(f"📁 Workspace: {self.workspace_id}")
         
         # Pull initial si activé
         if self.config.get('auto_pull'):
